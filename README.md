@@ -1,2 +1,2 @@
 # atlas
-Simple code base for generating transcriptomic atlases 
+Simple code for generating transcriptomic atlases 
