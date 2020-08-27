@@ -1,11 +1,17 @@
 import numpy as np
 import pandas as pd
 import sklearn
+import scipy
 import gc
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 import sklearn.decomposition
 from sklearn.cluster import KMeans
+
+from plotly.offline import download_plotlyjs, init_notebook_mode, plot, iplot
+from plotly.graph_objs import *
+import plotly.figure_factory as ff
+import plotly.io
 
 def transform_to_percentile(dataframe):
 
@@ -26,7 +32,7 @@ def transform_to_percentile(dataframe):
 
     '''
 
-    transformed_dataframe = (dataframe.shape[0] - dataframe.rank(axis=0, ascending=False, na_option='bottom')+1)/dataframe.shape[0]
+    transformed_dataframe = (dataframe.shape[0] - dataframe.rank(axis=0, ascending=False, na_option='bottom')+1)/(1+dataframe.shape[0])
 
     return transformed_dataframe
 
@@ -57,24 +63,78 @@ def calculate_platform_dependence(data, annotations):
     from statsmodels.tools.sm_exceptions import ConvergenceWarning
     warnings.simplefilter('ignore', ConvergenceWarning)
 
-    output_df = pd.DataFrame(index=data.index, columns=['VarFraction'])
-
+    output_df = pd.DataFrame(index=data.index, columns=['Platform_VarFraction'])
     data = data.copy().transpose().merge(annotations['Platform_Category'], how='left', left_index=True, right_index=True)
 
     for i_gene in data.columns.values[:-1]:
  
         md  = smf.mixedlm("%s ~ Platform_Category" %str(i_gene), data=data, groups = data['Platform_Category'])
         mdf = md.fit()
-
-        output_df.loc[i_gene, 'VarFraction'] = mdf.fittedvalues.std()**2/(mdf.fittedvalues.std()**2+mdf.resid.std()**2)
+        output_df.loc[i_gene, 'Platform_VarFraction'] = mdf.fittedvalues.std()**2/(mdf.fittedvalues.std()**2+mdf.resid.std()**2)
 
     return output_df
 
+def calculate_celltype_dependence(data, annotations):
 
-def resample_clustering(data, annotations, resample_strategy, n_resamples=10, n_clusters_list=[3,4]):
+    '''
+    Calculates the fraction of variance due to celltype and platform. Copied from Yidi Deng's work. BUT NOT WORKING AT THE MOMENT.
+
+    Parameters:
+    ----------
+
+    data
+        Dataframe containing expression values, index as variables (genes), columns as samples
+
+    annotations
+        Dataframe containing metadata, index as samples, requires a column 'Platform_Category'
+
+    Returns:
+    ----------
+
+    output_df
+        Dataframe contains fraction of variance due to platform
+
+    '''
+
+    print("WARNING:this is not giving results consistent with the R version at the moment")
+ 
+    import warnings
+    from statsmodels.tools.sm_exceptions import ConvergenceWarning
+    warnings.simplefilter('ignore', ConvergenceWarning)
+
+    output_df = pd.DataFrame(index=data.index, columns=['Platform_VarFraction', 'celltype_VarFraction'])
+    data = data.copy().transpose().merge(annotations[['Platform_Category', 'celltype']], how='left', left_index=True, right_index=True)
+
+    data["group"] = 1                                                                                                            
+    vcf = {"celltype": "0 + C(celltype)", "Platform_Category": "0 + C(Platform_Category)"} 
+
+    platform_fit = data.Platform_Category.copy()
+
+    #for i_gene in data.columns.values[:-2]:
+    for i_gene in data.columns.values[:10]:
+
+        md = sm.MixedLM.from_formula("%s ~ 1" %str(i_gene), groups="group",                                                    
+                                vc_formula=vcf, re_formula="0", data=data)  
+        mdf = md.fit()
+
+        for i_platform in annotations.Platform_Category.unique().astype(str):
+
+            sel = np.core.defchararray.count(mdf.random_effects[1].index.values.astype(str), i_platform) > 0
+            platform_fit.loc[data.Platform_Category==i_platform] = mdf.random_effects[1].values[sel][0] 
+
+        celltype_fit = mdf.fittedvalues-platform_fit.values-mdf.params.Intercept
+
+        output_df.loc[i_gene, 'Platform_VarFraction'] = platform_fit.std()**2/(platform_fit.std()**2+celltype_fit.std()**2+mdf.resid.std()**2)
+        output_df.loc[i_gene, 'celltype_VarFraction'] = celltype_fit.std()**2/(platform_fit.std()**2+celltype_fit.std()**2+mdf.resid.std()**2)
+
+    return output_df
+
+def resample_clustering(data, annotations, resample_strategy, n_resamples=200, n_clusters_list=[3,4]):
     
     ''' 
-    This cumbersome function performs either jack-knife or bootstrap resampling, 
+    This cumbersome function performs either jack-knife or bootstrap resampling. 
+    WARNING: At each iteration it will recalculate gene platform dependence. So it takes 1 minutes to platform dependence, and 200 resamples are performed, 
+    it will take 200x1 = 200 minutes (a bit long...).
  
     Parameters
     ---------
@@ -213,9 +273,139 @@ def calc_H_index(dataframe):
 
     return np.array(h_index_per_cluster)
 
+def KruskalWallisHTest(coords, annotations):
+
+    '''
+    Uses the Kruskal Wallis H Test as a proxy for the dependence of a single principal component on platform.
+
+    Parameters
+    ----------
+
+    coords
+        Numpy array, coordinates of each sample along a principal component.
+
+    annotations
+        Dataframe with sample metadata, must have 'Platform_Category' as a column
+
+    Returns
+    ----------
+
+    kruskal
+        Float, the result of the Kruskal Wallis H Test
+
+    '''
+
+    groups = {}
+
+    for i_platform in annotations['Platform_Category'].unique():
+        sel = annotations['Platform_Category']==i_platform
+        groups[i_platform] = coords[sel]
+
+    args = groups.values()
+    
+    return scipy.stats.kruskal(*args)[0]  
 
 
+def plot_KW_Htest(data, annotations, varPart_df, output_loc):
 
+    '''
+    Varies the platform dependence threshold from 0.02->1.0 
+    Calculates the strenth of the platform dependence upon a the first 10 principal components as the threshold changes
+    Plots results as a heatmap
+
+    Parameters
+    ----------
+
+    data
+        Expression values, index as genes, columns as samples
+
+    annotations
+        Metadata, index as samples, columns as properties 
+        Must have a 'Platform_Category' column
+
+    varPart_df
+        Dataframe contains fraction of variance due to platform under the column 'Platform_VarFraction'
+
+    output_loc
+        location where to save the figure
+
+    Returns
+    ----------
+
+    platform_kruskal
+        Dataframe containing the KW H test results for each of the first 10 componenets, for each of the platform variance thresholds iterated over
+
+    '''
+
+    print("Assessing platform dependence for principal components with varying threshold.")
+
+    # Loop through cut values
+    n_components   = 10
+    n_thresholds   = 50
+
+    threshold_list = np.arange(1, n_thresholds)/n_thresholds
+    platform_kruskal = pd.DataFrame(data = np.empty(shape=(threshold_list.shape[0], n_components)), index=threshold_list, columns=np.arange(1,n_components+1))
+    n_genes_list = []
+
+    for i_thresh in range(threshold_list.shape[0]):
+
+        cut_thresh    = threshold_list[i_thresh]
+        sel_varPart   = varPart_df.Platform_VarFraction.values <= cut_thresh
+        genes_to_keep = data.loc[sel_varPart].index.values
+
+        print("Analysing threshold of %f (%d genes)" %(cut_thresh, genes_to_keep.shape[0]))
+
+        transformed_data = transform_to_percentile(data.loc[genes_to_keep].copy())
+
+        pca    = sklearn.decomposition.PCA(n_components=n_components)
+        output = pca.fit_transform(transformed_data.transpose())
+
+        for i_component in range(n_components): 
+            platform_kruskal.iloc[i_thresh, i_component] = KruskalWallisHTest(output[:,i_component], annotations)/output.shape[0]
+
+    fig = Figure(data=Heatmap(z=platform_kruskal.values, x=np.arange(1,n_components+1), y=threshold_list, colorscale = 'Viridis'), 
+                layout=Layout(title="KW H test",xaxis_title="Component",yaxis_title="Platform Variance Fraction Threshold", yaxis_nticks=10, width=700, height=700,
+                              autosize = False))
+    plot(fig, auto_open=False, filename=output_loc+'/KW_Htest.html')
+
+    return platform_kruskal
 
     
+def plot_gene_platform_dependence(data, annotations, varPart_df, output_loc):
+
+    '''
+    Varies the platform dependence threshold from 0.02->1.0 
+    Calculates the strenth of the platform dependence upon a the first 10 principal components as the threshold changes
+    Plots results as a heatmap
+
+    Parameters
+    ----------
+
+    data
+        Expression values, index as genes, columns as samples
+
+    annotations
+        Metadata, index as samples, columns as properties 
+        Must have a 'Platform_Category' column
+
+    varPart_df
+        Dataframe contains fraction of variance due to platform under the column 'Platform_VarFraction'
+
+    output_loc
+        location where to save the figure
+
+    '''
+
+    #Distribution of platform dependence variance fraction
+    fig = Figure(data=[Histogram(x=varPart_df.Platform_VarFraction.values, xbins=dict(start=0.0,end=1.0,size=0.02))], 
+                layout=Layout(xaxis_title="Platform Variance Fraction Threshold", yaxis_title="N Genes", width=700, height=700))
+    plot(fig, auto_open=False, filename=output_loc+'/varFraction_distribution.html')
+
+    #Number of genes passing cut
+    vals, bins = np.histogram(varPart_df.Platform_VarFraction.values, bins=50)
+    fig = Figure(data=[Scatter(x=0.5*(bins[:-1]+bins[1:]), y=np.cumsum(vals))], 
+                layout=Layout(xaxis_title="Platform Variance Fraction Threshold", yaxis_title="Number of genes passing cut", width=700, height=700))
+    fig.update_xaxes(autorange="reversed")
+    plot(fig, auto_open=False, filename=output_loc+'/passing_genes_vs_threshold.html')
+
 
