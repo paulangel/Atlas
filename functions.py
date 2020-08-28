@@ -418,7 +418,7 @@ def plot_gene_platform_dependence_cumulative_distribution(data, annotations, var
     iplot(fig)
 
 
-more_colour_list = ['red', 'green', 'black', 'yellow', 'cyan']
+more_colour_list = ['red', 'green', 'black', 'yellow', 'cyan', 'brown', 'coral', 'sandybrown', 'darkorange', 'olive', 'limegreen', 'lightseagreen', 'teal', 'skyblue']
 
 def plot_pca(data, annotations, varPart_df, labels, colour_dict):
 
@@ -490,7 +490,6 @@ def plot_pca(data, annotations, varPart_df, labels, colour_dict):
     
     for i_label in labels:
         visibility_list = (visibility_df.label.values==i_label).tolist()
-        print(visibility_list)
     
         button_list.append(dict(label=i_label,
                                 method="update",
