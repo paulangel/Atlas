@@ -371,12 +371,59 @@ def plot_KW_Htest(data, annotations, varPart_df, output_loc):
     return platform_kruskal
 
     
-def plot_gene_platform_dependence(data, annotations, varPart_df, output_loc):
+def plot_gene_platform_dependence_distribution(data, annotations, varPart_df):
 
     '''
-    Varies the platform dependence threshold from 0.02->1.0 
-    Calculates the strenth of the platform dependence upon a the first 10 principal components as the threshold changes
-    Plots results as a heatmap
+    Parameters
+    ----------
+
+    data
+        Expression values, index as genes, columns as samples
+
+    annotations
+        Metadata, index as samples, columns as properties 
+        Must have a 'Platform_Category' column
+
+    varPart_df
+        Dataframe contains fraction of variance due to platform under the column 'Platform_VarFraction'
+    '''
+
+    #Distribution of platform dependence variance fraction
+    fig = Figure(data=[Histogram(x=varPart_df.Platform_VarFraction.values, xbins=dict(start=0.0,end=1.0,size=0.02))], 
+                layout=Layout(xaxis_title="Platform Variance Fraction Threshold", yaxis_title="N Genes", width=700, height=700))
+    iplot(fig)
+
+def plot_gene_platform_dependence_cumulative_distribution(data, annotations, varPart_df):
+
+    '''
+    Parameters
+    ----------
+
+    data
+        Expression values, index as genes, columns as samples
+
+    annotations
+        Metadata, index as samples, columns as properties 
+        Must have a 'Platform_Category' column
+
+    varPart_df
+        Dataframe contains fraction of variance due to platform under the column 'Platform_VarFraction'
+    '''
+
+    #Number of genes passing cut
+    vals, bins = np.histogram(varPart_df.Platform_VarFraction.values, bins=50)
+    fig = Figure(data=[Scatter(x=0.5*(bins[:-1]+bins[1:]), y=np.cumsum(vals))], 
+                layout=Layout(xaxis_title="Platform Variance Fraction Threshold", yaxis_title="Number of genes passing cut", width=700, height=700))
+    fig.update_xaxes(autorange="reversed")
+    iplot(fig)
+
+
+more_colour_list = ['red', 'green', 'black', 'yellow', 'cyan']
+
+def plot_pca(data, annotations, varPart_df, labels, colour_dict):
+
+    '''
+    Generate PCA plot of Atlas
 
     Parameters
     ----------
@@ -391,21 +438,70 @@ def plot_gene_platform_dependence(data, annotations, varPart_df, output_loc):
     varPart_df
         Dataframe contains fraction of variance due to platform under the column 'Platform_VarFraction'
 
-    output_loc
-        location where to save the figure
+    labels
+        list of metadata labels to plot, e.g. ['Dataset', 'celltype', 'Platform_Category']
+
+    colour_dict
+        colours to used to plot in a dictionary format
 
     '''
 
-    #Distribution of platform dependence variance fraction
-    fig = Figure(data=[Histogram(x=varPart_df.Platform_VarFraction.values, xbins=dict(start=0.0,end=1.0,size=0.02))], 
-                layout=Layout(xaxis_title="Platform Variance Fraction Threshold", yaxis_title="N Genes", width=700, height=700))
-    plot(fig, auto_open=False, filename=output_loc+'/varFraction_distribution.html')
+    pca        = sklearn.decomposition.PCA(n_components=10, svd_solver='full')
+    pca_coords = pca.fit_transform(transform_to_percentile(data.loc[varPart_df.Platform_VarFraction.values<=0.2]).transpose())
 
-    #Number of genes passing cut
-    vals, bins = np.histogram(varPart_df.Platform_VarFraction.values, bins=50)
-    fig = Figure(data=[Scatter(x=0.5*(bins[:-1]+bins[1:]), y=np.cumsum(vals))], 
-                layout=Layout(xaxis_title="Platform Variance Fraction Threshold", yaxis_title="Number of genes passing cut", width=700, height=700))
-    fig.update_xaxes(autorange="reversed")
-    plot(fig, auto_open=False, filename=output_loc+'/passing_genes_vs_threshold.html')
+    visibility_df = pd.DataFrame(columns=['type', 'label'])
 
+    counter = 0
+    for i_label in labels:
+        if annotations[i_label].dtype==np.float64():
+            visibility_df.loc[counter] = [i_label, i_label]
+            counter+=1
+        else:
+            for i_type in annotations[i_label].unique().astype(str):
+                visibility_df.loc[counter] = [i_type, i_label]
+                counter+=1
 
+    extended_colour_dict = {key:np.random.choice(more_colour_list) for key in \
+                            visibility_df.type.unique() if key not in colour_dict.keys()}
+
+    colour_dict.update(extended_colour_dict)
+
+    fig = Figure()
+
+    button_list = []
+    for i_label in labels:
+        if annotations[i_label].dtype==np.float64():
+
+            fig.add_trace(Scatter3d(x=pca_coords[:,0], y=pca_coords[:,1], z=pca_coords[:,2], 
+                mode='markers', text=annotations.display_metadata.values, 
+                opacity=0.9, name=i_label, visible=False, 
+                marker=dict(size=5, color=annotations[i_label].values,
+                colorscale = 'viridis')))
+        else:
+            for i_type in annotations[i_label].unique().astype(str):
+
+                sel = annotations[i_label].values.astype(str) == i_type 
+                i_colour = colour_dict[i_type]
+
+                fig.add_trace(Scatter3d(x=pca_coords[sel,0], y=pca_coords[sel,1], z=pca_coords[sel,2], 
+                    mode='markers', text=annotations.display_metadata.values[sel], 
+                    opacity=0.9, name=i_type, visible=False, 
+                    marker=dict(size=5, color=i_colour)))
+    
+    for i_label in labels:
+        visibility_list = (visibility_df.label.values==i_label).tolist()
+        print(visibility_list)
+    
+        button_list.append(dict(label=i_label,
+                                method="update",
+                                args=[{"visible": visibility_list},
+                                {"title": i_label}]))
+   
+    fig.update_layout(
+        updatemenus=[dict(active=0,buttons=button_list,)],
+        scene = dict(xaxis_title='PC1 %%%.2f' %(pca.explained_variance_ratio_[0]*100),
+                     yaxis_title='PC2 %%%.2f' %(pca.explained_variance_ratio_[1]*100),
+                     zaxis_title='PC3 %%%.2f' %(pca.explained_variance_ratio_[2]*100))
+        )
+
+    iplot(fig)
