@@ -1,0 +1,42 @@
+Sample Source	
+in vivo	#238b45
+ex vivo	#66c2a4
+in vitro	#b2e2e2
+	
+### Progenitor Type	
+myeloid	#253494
+pluripotent stem cell	#8c6bb1
+hematopoietic progenitor cell	#dd3497
+	
+### Cell Type	
+kupffer cell	#081d58
+microglia	#225ea8
+macrophage	#1d91c0
+monocyte	#253494
+-----	
+CD141+ dendritic cell	#7fcdbb
+CD1c+ dendritic cell	#c7e9b4
+plasmacytoid dendritic cell	#edf8b1
+dendritic cell	#41b6c4
+-----	
+common myeloid progenitor	#7a0177
+common lymphoid progenitor	#ae017e
+granulocyte monocyte progenitor	#49006a
+hematopoietic multipotent progenitor	#dd3497
+-----	
+neutrophil	#5e2f0d
+granulocyte	#5e2f0d
+myelocyte	#8b4513
+metamyelocyte	#8b4513
+promyelocyte	#8b4513
+-----	
+erythrocyte	#fcc5c0
+erythroblast	#fa9fb5
+proerythroblast	#f768a1
+-----	
+endothelial progenitor	#fdbe85
+hemogenic endothelium	#fd8d3c
+hemangioblast	#d94701
+
+### Paul's reserved colour for unannotated samples
+Unannotated	#a9a9a9
