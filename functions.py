@@ -306,7 +306,7 @@ def KruskalWallisHTest(coords, annotations):
     return scipy.stats.kruskal(*args)[0]  
 
 
-def plot_KW_Htest(data, annotations, varPart_df, output_loc):
+def plot_KW_Htest(data, annotations, varPart_df):
 
     '''
     Varies the platform dependence threshold from 0.02->1.0 
@@ -325,9 +325,6 @@ def plot_KW_Htest(data, annotations, varPart_df, output_loc):
 
     varPart_df
         Dataframe contains fraction of variance due to platform under the column 'Platform_VarFraction'
-
-    output_loc
-        location where to save the figure
 
     Returns
     ----------
@@ -366,7 +363,7 @@ def plot_KW_Htest(data, annotations, varPart_df, output_loc):
     fig = Figure(data=Heatmap(z=platform_kruskal.values, x=np.arange(1,n_components+1), y=threshold_list, colorscale = 'Viridis'), 
                 layout=Layout(title="KW H test",xaxis_title="Component",yaxis_title="Platform Variance Fraction Threshold", yaxis_nticks=10, width=700, height=700,
                               autosize = False))
-    plot(fig, auto_open=False, filename=output_loc+'/KW_Htest.html')
+    iplot(fig)
 
     return platform_kruskal
 
