@@ -467,7 +467,7 @@ def plot_pca(data, annotations, varPart_df, labels, colour_dict):
 
     button_list = []
     for i_label in labels:
-        if annotations[i_label].dtype==np.float64():
+        if (annotations[i_label].dtype==np.float64()) and (i_label!='Dataset'):
 
             fig.add_trace(Scatter3d(x=pca_coords[:,0], y=pca_coords[:,1], z=pca_coords[:,2], 
                 mode='markers', text=annotations.display_metadata.values, 
