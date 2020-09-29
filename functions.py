@@ -64,17 +64,17 @@ def calculate_platform_dependence(data, annotations):
     warnings.simplefilter('ignore', ConvergenceWarning)
 
     output_df = pd.DataFrame(index=data.index, columns=['Platform_VarFraction'])
-    data = data.copy().transpose().merge(annotations['Platform_Category'], how='left', left_index=True, right_index=True)
+    temp_data = data.copy().transpose().merge(annotations['Platform_Category'], how='left', left_index=True, right_index=True)
 
-    for i_gene in data.columns.values[:-1]:
- 
-        md  = smf.mixedlm("%s ~ Platform_Category" %str(i_gene), data=data, groups = data['Platform_Category'])
+    for i_gene in temp_data.columns.values[:-1]:
+
+        md  = smf.mixedlm("%s ~ Platform_Category" %str(i_gene), data=temp_data, groups = temp_data['Platform_Category'])
         mdf = md.fit()
         output_df.loc[i_gene, 'Platform_VarFraction'] = mdf.fittedvalues.std()**2/(mdf.fittedvalues.std()**2+mdf.resid.std()**2)
 
     return output_df
 
-def calculate_celltype_dependence(data, annotations):
+def calculate_celltype_dependence(data, annotations, gene=None):
 
     '''
     Calculates the fraction of variance due to celltype and platform. Copied from Yidi Deng's work. BUT NOT WORKING AT THE MOMENT.
@@ -88,6 +88,9 @@ def calculate_celltype_dependence(data, annotations):
     annotations
         Dataframe containing metadata, index as samples, requires a column 'Platform_Category'
 
+    gene
+        either a single gene to analyse, or a list, defaults to doing all genes in data
+
     Returns:
     ----------
 
@@ -96,36 +99,45 @@ def calculate_celltype_dependence(data, annotations):
 
     '''
 
-    print("WARNING:this is not giving results consistent with the R version at the moment")
- 
-    import warnings
-    from statsmodels.tools.sm_exceptions import ConvergenceWarning
-    warnings.simplefilter('ignore', ConvergenceWarning)
+    if isinstance(gene, str):
+        genes_to_iterate = [gene]
+    elif gene is None:
+        genes_to_iterate = data.index.values
+    else:
+        genes_to_iterate = gene
 
-    output_df = pd.DataFrame(index=data.index, columns=['Platform_VarFraction', 'celltype_VarFraction'])
-    data = data.copy().transpose().merge(annotations[['Platform_Category', 'celltype']], how='left', left_index=True, right_index=True)
+    output_df = pd.DataFrame(index=genes_to_iterate, columns=['Platform_VarFraction', 'celltype_VarFraction'])
+    temp_data = data.copy().transpose().merge(annotations[['Platform_Category', 'celltype']], how='left', left_index=True, right_index=True)
 
-    data["group"] = 1                                                                                                            
+    temp_data["group"] = 1                                                                                                            
     vcf = {"celltype": "0 + C(celltype)", "Platform_Category": "0 + C(Platform_Category)"} 
 
-    platform_fit = data.Platform_Category.copy()
+    for i in range(len(genes_to_iterate)):
 
-    #for i_gene in data.columns.values[:-2]:
-    for i_gene in data.columns.values[:10]:
+        i_gene = genes_to_iterate[i]
+        print(i, i_gene) 
 
         md = sm.MixedLM.from_formula("%s ~ 1" %str(i_gene), groups="group",                                                    
-                                vc_formula=vcf, re_formula="0", data=data)  
-        mdf = md.fit()
+                                vc_formula=vcf, re_formula=None, data=temp_data)  
+        mdf = md.fit(reml=True,method="powell")
+
+        '''
+        platform_fit = temp_data.Platform_Category.copy()
 
         for i_platform in annotations.Platform_Category.unique().astype(str):
 
-            sel = np.core.defchararray.count(mdf.random_effects[1].index.values.astype(str), i_platform) > 0
-            platform_fit.loc[data.Platform_Category==i_platform] = mdf.random_effects[1].values[sel][0] 
+            sel = np.core.defchararray.count(mdf.random_effects[1].index.values.astype(str), "["+i_platform+"]") > 0
+            platform_fit.loc[temp_data.Platform_Category==i_platform] = mdf.random_effects[1].values[sel][0] 
 
         celltype_fit = mdf.fittedvalues-platform_fit.values-mdf.params.Intercept
+        print(mdf.summary(), celltype_fit.std(), platform_fit.std())
 
         output_df.loc[i_gene, 'Platform_VarFraction'] = platform_fit.std()**2/(platform_fit.std()**2+celltype_fit.std()**2+mdf.resid.std()**2)
         output_df.loc[i_gene, 'celltype_VarFraction'] = celltype_fit.std()**2/(platform_fit.std()**2+celltype_fit.std()**2+mdf.resid.std()**2)
+        '''
+
+        output_df.loc[i_gene, 'Platform_VarFraction'] = mdf.vcomp[0]/(mdf.vcomp.sum()+mdf.scale)
+        output_df.loc[i_gene, 'celltype_VarFraction'] = mdf.vcomp[1]/(mdf.vcomp.sum()+mdf.scale)
 
     return output_df
 
@@ -443,20 +455,26 @@ def plot_pca(data, annotations, varPart_df, labels, colour_dict):
 
     '''
 
+    if isinstance(data, pd.DataFrame):
+        data = [data]
+        annotations = [annotations]
+
     pca        = sklearn.decomposition.PCA(n_components=10, svd_solver='full')
-    pca_coords = pca.fit_transform(transform_to_percentile(data.loc[varPart_df.Platform_VarFraction.values<=0.2]).transpose())
+    pca.fit(transform_to_percentile(data[0].loc[varPart_df.Platform_VarFraction.values<=0.2]).transpose())
+    pca_coords = [pca.transform(transform_to_percentile(i_data.loc[varPart_df.Platform_VarFraction.values<=0.2]).transpose()) for i_data in data]
 
     visibility_df = pd.DataFrame(columns=['type', 'label'])
 
     counter = 0
     for i_label in labels:
-        if annotations[i_label].dtype==np.float64():
-            visibility_df.loc[counter] = [i_label, i_label]
-            counter+=1
-        else:
-            for i_type in annotations[i_label].unique().astype(str):
-                visibility_df.loc[counter] = [i_type, i_label]
+        for i_annotation in annotations:
+            if (i_annotation[i_label].dtype==np.float64()) and (i_label!='Dataset'):
+                visibility_df.loc[counter] = [i_label, i_label]
                 counter+=1
+            else:
+                for i_type in i_annotation[i_label].unique().astype(str):
+                    visibility_df.loc[counter] = [i_type, i_label]
+                    counter+=1
 
     extended_colour_dict = {key:np.random.choice(more_colour_list) for key in \
                             visibility_df.type.unique() if key not in colour_dict.keys()}
@@ -467,37 +485,38 @@ def plot_pca(data, annotations, varPart_df, labels, colour_dict):
 
     button_list = []
     for i_label in labels:
-        if (annotations[i_label].dtype==np.float64()) and (i_label!='Dataset'):
+        for i_annotation, i_pca_coords in zip(annotations, pca_coords):
 
-            fig.add_trace(Scatter3d(x=pca_coords[:,0], y=pca_coords[:,1], z=pca_coords[:,2], 
-                mode='markers', text=annotations.display_metadata.values, 
-                opacity=0.9, name=i_label, visible=False, 
-                marker=dict(size=5, color=annotations[i_label].values,
-                colorscale = 'viridis')))
-        else:
-            for i_type in annotations[i_label].unique().astype(str):
-
-                sel = annotations[i_label].values.astype(str) == i_type 
-                i_colour = colour_dict[i_type]
-
-                fig.add_trace(Scatter3d(x=pca_coords[sel,0], y=pca_coords[sel,1], z=pca_coords[sel,2], 
-                    mode='markers', text=annotations.display_metadata.values[sel], 
-                    opacity=0.9, name=i_type, visible=False, 
-                    marker=dict(size=5, color=i_colour)))
+            if (i_annotation[i_label].dtype==np.float64()) and (i_label!='Dataset'):
     
-    for i_label in labels:
+                fig.add_trace(Scatter3d(x=i_pca_coords[:,0], y=i_pca_coords[:,1], z=i_pca_coords[:,2], 
+                    mode='markers', text=i_annotation.display_metadata.values, 
+                    opacity=0.9, name=i_label, visible=False, 
+                    marker=dict(size=5, color=i_annotation[i_label].values,
+                    colorscale = 'viridis')))
+            else:
+                for i_type in i_annotation[i_label].unique().astype(str):
+    
+                    sel = i_annotation[i_label].values.astype(str) == i_type 
+                    i_colour = colour_dict[i_type]
+    
+                    fig.add_trace(Scatter3d(x=i_pca_coords[sel,0], y=i_pca_coords[sel,1], z=i_pca_coords[sel,2], 
+                        mode='markers', text=i_annotation.display_metadata.values[sel], 
+                        opacity=0.9, name=i_type, visible=False, 
+                        marker=dict(size=5, color=i_colour)))
+        
         visibility_list = (visibility_df.label.values==i_label).tolist()
-    
+        
         button_list.append(dict(label=i_label,
-                                method="update",
-                                args=[{"visible": visibility_list},
-                                {"title": i_label}]))
-   
-    fig.update_layout(
-        updatemenus=[dict(active=0,buttons=button_list,)],
-        scene = dict(xaxis_title='PC1 %%%.2f' %(pca.explained_variance_ratio_[0]*100),
-                     yaxis_title='PC2 %%%.2f' %(pca.explained_variance_ratio_[1]*100),
-                     zaxis_title='PC3 %%%.2f' %(pca.explained_variance_ratio_[2]*100))
-        )
+                                    method="update",
+                                    args=[{"visible": visibility_list},
+                                    {"title": i_label}]))
+       
+        fig.update_layout(
+            updatemenus=[dict(active=0,buttons=button_list,)],
+            scene = dict(xaxis_title='PC1 %%%.2f' %(pca.explained_variance_ratio_[0]*100),
+                         yaxis_title='PC2 %%%.2f' %(pca.explained_variance_ratio_[1]*100),
+                         zaxis_title='PC3 %%%.2f' %(pca.explained_variance_ratio_[2]*100))
+            )
 
     iplot(fig)
