@@ -478,13 +478,21 @@ def plot_pca(data, annotations, varPart_df, labels, colour_dict):
 
     extended_colour_dict = {key:np.random.choice(more_colour_list) for key in \
                             visibility_df.type.unique() if key not in colour_dict.keys()}
-
     colour_dict.update(extended_colour_dict)
+
+    symbols_index = np.unique(annotations[0].tier1.values, return_inverse=True)[1]
+    annotations[0]['symbol'] = [['circle','square','diamond','cross','square-open','diamond-open','circle-open'][i] for i in symbols_index]
+    for i in range(1,len(annotations)):
+        annotations[i]['symbol'] = 'x'
 
     fig = Figure()
 
     button_list = []
     for i_label in labels:
+
+        #symbol_list = []
+        visibility_list = (visibility_df.label.values==i_label).tolist()
+
         for i_annotation, i_pca_coords in zip(annotations, pca_coords):
 
             if (i_annotation[i_label].dtype==np.float64()) and (i_label!='Dataset'):
@@ -499,19 +507,18 @@ def plot_pca(data, annotations, varPart_df, labels, colour_dict):
     
                     sel = i_annotation[i_label].values.astype(str) == i_type 
                     i_colour = colour_dict[i_type]
-    
+                    #symbol_list.append(i_annotation.symbol.values[sel])
+
                     fig.add_trace(Scatter3d(x=i_pca_coords[sel,0], y=i_pca_coords[sel,1], z=i_pca_coords[sel,2], 
                         mode='markers', text=i_annotation.display_metadata.values[sel], 
                         opacity=0.9, name=i_type, visible=False, 
-                        marker=dict(size=5, color=i_colour)))
-        
-        visibility_list = (visibility_df.label.values==i_label).tolist()
+                        marker=dict(size=5, color=i_colour, symbol=i_annotation.symbol.values[sel])))
         
         button_list.append(dict(label=i_label,
-                                    method="update",
-                                    args=[{"visible": visibility_list},
+                                method="update",
+                                args=[{"visible": visibility_list},
                                     {"title": i_label}]))
-       
+      
         fig.update_layout(
             updatemenus=[dict(active=0,buttons=button_list,)],
             scene = dict(xaxis_title='PC1 %%%.2f' %(pca.explained_variance_ratio_[0]*100),
