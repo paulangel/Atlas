@@ -461,7 +461,7 @@ def plot_pca(data, annotations, varPart_df, labels, colour_dict):
 
     pca        = sklearn.decomposition.PCA(n_components=10, svd_solver='full')
     pca.fit(transform_to_percentile(data[0].loc[varPart_df.Platform_VarFraction.values<=0.2]).transpose())
-    pca_coords = [pca.transform(transform_to_percentile(i_data.loc[varPart_df.Platform_VarFraction.values<=0.2]).transpose()) for i_data in data]
+    pca_coords = [pca.transform(transform_to_percentile(i_data.loc[varPart_df.Platform_VarFraction.values<=0.2].fillna(0.0)).transpose()) for i_data in data]
 
     visibility_df = pd.DataFrame(columns=['type', 'label'])
 
